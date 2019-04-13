@@ -1,0 +1,603 @@
+
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simulating Input Events</title>
+<meta charset="UTF-8">
+<script src="go.js"></script>
+<script src="jquery-3.3.1.js"></script> 
+<script src="bootstrap.min.js"></script> 
+<script src="jquery-linedtextarea.js"></script> 
+<link type="text/css" rel="stylesheet" href="bootstrap.min.css">
+<link type="text/css" rel="stylesheet" href="jquery-linedtextarea.css">
+
+
+<script>
+$(function() {
+
+  // Target all classed with ".lined"
+  $(".lined").linedtextarea();
+
+});
+ function init() {
+    if (window.goSamples) goSamples();  // init for these samples -- you don't need to call this
+    var $ = go.GraphObject.make;  // for conciseness in defining templates
+
+    myDiagram =
+      $(go.Diagram, "myDiagramDiv",  // must name or refer to the DIV HTML element
+        {
+          // start everything in the middle of the viewport
+          initialContentAlignment: go.Spot.Center,
+          // have mouse wheel events zoom in and out instead of scroll up and down
+          "toolManager.mouseWheelBehavior": go.ToolManager.WheelZoom,
+          // support double-click in background creating a new node
+          "clickCreatingTool.archetypeNodeData": { text: "new node" },
+          // enable undo & redo
+          "undoManager.isEnabled": true
+        });
+
+    // when the document is modified, add a "*" to the title and enable the "Save" button
+    myDiagram.addDiagramListener("Modified", function(e) {
+      var button = document.getElementById("SaveButton");
+      if (button) button.disabled = !myDiagram.isModified;
+      var idx = document.title.indexOf("*");
+      if (myDiagram.isModified) {
+        if (idx < 0) document.title += "*";
+      } else {
+        if (idx >= 0) document.title = document.title.substr(0, idx);
+      }
+    });
+
+    // define the Node template
+    myDiagram.nodeTemplate =
+      $(go.Node, "Auto",
+        new go.Binding("location", "loc", go.Point.parse).makeTwoWay(go.Point.stringify),
+        // define the node's outer shape, which will surround the TextBlock
+        $(go.Shape, "RoundedRectangle",
+          {
+            parameter1: 20,  // the corner has a large radius
+            fill: $(go.Brush, "Linear", { 0: "rgb(254, 201, 0)", 1: "rgb(254, 162, 0)" }),
+            stroke: null,
+            portId: "",  // this Shape is the Node's port, not the whole Node
+            fromLinkable: true, fromLinkableSelfNode: true, fromLinkableDuplicates: true,
+            toLinkable: true, toLinkableSelfNode: true, toLinkableDuplicates: true,
+            cursor: "pointer"
+          }),
+        $(go.TextBlock,
+          {
+            font: "bold 11pt helvetica, bold arial, sans-serif",
+            editable: true  // editing the text automatically updates the model data
+          },
+          new go.Binding("text").makeTwoWay())
+      );
+
+    // unlike the normal selection Adornment, this one includes a Button
+    myDiagram.nodeTemplate.selectionAdornmentTemplate =
+      $(go.Adornment, "Spot",
+        $(go.Panel, "Auto",
+          $(go.Shape, { fill: null, stroke: "blue", strokeWidth: 2 }),
+          $(go.Placeholder)  // a Placeholder sizes itself to the selected Node
+        ),
+        // the button to create a "next" node, at the top-right corner
+        $("Button",
+          {
+            alignment: go.Spot.TopRight,
+            click: addNodeAndLink  // this function is defined below
+          },
+          $(go.Shape, "PlusLine", { width: 6, height: 6 })
+        ) // end button
+      ); // end Adornment
+
+    // clicking the button inserts a new node to the right of the selected node,
+    // and adds a link to that new node
+    function addNodeAndLink(e, obj) {
+      var adornment = obj.part;
+      var diagram = e.diagram;
+      diagram.startTransaction("Add State");
+
+      // get the node data for which the user clicked the button
+      var fromNode = adornment.adornedPart;
+      var fromData = fromNode.data;
+      // create a new "State" data object, positioned off to the right of the adorned Node
+      var toData = { text: "new" };
+      var p = fromNode.location.copy();
+      p.x += 200;
+      toData.loc = go.Point.stringify(p);  // the "loc" property is a string, not a Point object
+      // add the new node data to the model
+      var model = diagram.model;
+      model.addNodeData(toData);
+
+      // create a link data from the old node data to the new node data
+      var linkdata = {
+        from: model.getKeyForNodeData(fromData),  // or just: fromData.id
+        to: model.getKeyForNodeData(toData)
+        //text: "transition"
+      };
+      // and add the link data to the model
+      model.addLinkData(linkdata);
+
+      // select the new Node
+      var newnode = diagram.findNodeForData(toData);
+      diagram.select(newnode);
+
+      diagram.commitTransaction("Add State");
+
+      // if the new node is off-screen, scroll the diagram to show the new node
+      diagram.scrollToRect(newnode.actualBounds);
+    }
+
+    // replace the default Link template in the linkTemplateMap
+    myDiagram.linkTemplate =
+      $(go.Link,  // the whole link panel
+        {
+          curve: go.Link.Bezier, adjusting: go.Link.Stretch,
+          reshapable: true, relinkableFrom: true, relinkableTo: true,
+          toShortLength: 3
+        },
+        new go.Binding("points").makeTwoWay(),
+        new go.Binding("curviness"),
+        $(go.Shape,  // the link shape
+          { strokeWidth: 1.5 }),
+        $(go.Shape,  // the arrowhead
+          { toArrow: "standard", stroke: null }),
+        $(go.Panel, "Auto",
+          $(go.Shape,  // the label background, which becomes transparent around the edges
+            {
+              fill: $(go.Brush, "Radial",
+                      { 0: "rgb(240, 240, 240)", 0.3: "rgb(240, 240, 240)", 1: "rgba(240, 240, 240, 0)" }),
+              stroke: null
+            }),
+          $(go.TextBlock, 
+		  //"transition",  // the label text
+            //{
+              //textAlign: "center",
+              //font: "9pt helvetica, arial, sans-serif",
+              //margin: 4,
+              //editable: true  // enable in-place editing
+            //},
+            // editing the text automatically updates the model data
+            new go.Binding("text").makeTwoWay())
+        )
+      );
+
+    
+  }
+
+ 
+	var nodes= [];
+	var links = [];
+	var help =[];
+	var help2 = [];
+	var whil = [];
+	
+	var x = 120; // last x that we reached
+	var y = 20; // last y that we reached
+	yif = -1;
+	
+	function drawgraph(){
+		nodes= [];
+		links = [];
+		
+		names = [];
+		indeces = [];
+		lastindeces = [];
+		helper= [];
+		y_if = [];
+		last_y_if = -1;
+		
+		name = "";
+		index = -1;
+		
+		x = 120;
+		y = 20;
+		//nodes[nodes.length] = {key : index , loc :  x + " " + y  , text: index  };
+		//links[links.length] = {from:  index-1 , to:  index , curviness: +20 };
+		
+		var lines = $('textarea').val().trim().split('\n');
+		
+		for(var i = 0;i < lines.length;i++){
+			e = lines[i].includes( "if" );
+			if(e == true)
+				line = "if";
+			else
+			{
+				e = lines[i].includes( "while" );
+				if(e == true)
+					line = "while";
+				else{
+					e = lines[i].includes( "else" );
+					if(e == true)
+						line = "else";
+					else{
+						e = lines[i].includes( "}" );
+						if(e == true)
+							line = "}";
+						else{
+						
+							line = lines[i].trim();
+						}
+					}
+				}
+			}
+			
+			
+			
+				
+			console.log(line);
+			
+			switch(line)
+			{
+				case "if":
+					y += 50;
+					y_if.push(y);
+					if ( nodes.length == 0)
+					{
+						nodes.push({key : i , loc :  x + " " + y  , text: i  });
+						names.push("if");
+						indeces.push(i);
+						x += 100;
+						break;
+					}
+					if (name == "if")
+					{
+						
+						nodes.push({key : i , loc :  x + " " + y  , text: i  });
+						var last = lastindeces.pop();
+						links[links.length] = {from:  index , to:  i , curviness: +0 };
+						links[links.length] = {from:  last , to:  i , curviness: +0 };
+						names.push("if");
+						indeces.push(i);
+						x += 100;
+						name= "";
+						index = -1;
+						break;
+					}
+					 if ( name == "else" )
+					{
+						nodes.push({key : i , loc :  x + " " + y  , text: i  });
+						var last = lastindeces.pop();
+						links[links.length] = {from:  last , to:  i , curviness: +0 };
+						last = lastindeces.pop();
+						links[links.length] = {from:  last , to:  i , curviness: +0 };
+						name= "";
+						index = -1;
+						names.push("if");
+						indeces.push(i);
+						x += 100;
+						break;
+						
+					}
+				   	 if (name == "while"  )
+					{
+						nodes.push({key : i , loc :  x + " " + y  , text: i  });
+						links[links.length] = {from:  index , to:  i , curviness: +0 };
+						// lastindeces.pop();
+						name= "";
+						index = -1;
+						names.push("if");
+						indeces.push(i);
+						x += 100;
+						break;
+					}
+					else{
+						nodes.push({key : i , loc :  x + " " + y  , text: i  });
+						var ind = -1;
+						 ind = nodes[nodes.length - 2].key;
+						links[links.length] = {from:  ind , to:  i , curviness: +0 };
+						names.push("if");
+						indeces.push(i);
+						x += 100;
+						break;
+						
+					}
+						
+				
+				case "else":
+					names.push("else");
+					indeces.push(i);
+					x -= 100;
+					y = yif;
+					i++;
+					if ( name == "if")
+					{
+						if (lines[i].trim() == "if")
+						{
+							x += 100;
+							y += 50;
+							nodes.push({key : i , loc :  x + " " + y  , text: i  });
+							//var last = lastindeces.pop();
+							links[links.length] = {from:  index , to:  i , curviness: +0 };
+							//links[links.length] = {from:  last , to:  i , curviness: +0 };
+							names.push("if");
+							indeces.push(i);
+							name= "";
+							index = -1;
+							break;
+						}
+						if (lines[i].trim() == "while" )
+						{
+							y += 50;
+							nodes.push({key : i , loc :  x + " " + y  , text: i  });
+							links[links.length] = {from:  index , to:  i , curviness: +0 };
+							// lastindeces.pop();
+							name= "";
+							index = -1;
+							names.push("while");
+							indeces.push(i);
+							break;
+						}
+						
+						y = y +50;
+						nodes.push({key : i , loc :  x + " " + y  , text: i  });
+						links[links.length] = {from:  index , to:  i , curviness: +0 };
+					}
+					name = "";
+					index = -1;
+					break;
+					
+					
+				case "while":
+					y = y + 50;
+					var ind = -1;
+					if ( nodes.length != 0 )
+					{
+						ind = nodes[nodes.length - 1].key;
+					}
+					nodes.push({key : i , loc :  x + " " + y  , text: i  });
+					if ( ind != -1 )
+						links.push({from:  ind , to:  i , curviness: 0 });
+					names.push("while");
+					indeces.push(i);
+					break;
+					
+					
+				case "}":
+					if( index != -1)
+					{
+ 					   if ( name != "else"  )			   
+						{
+							if(name == "while")
+							{
+								lastindeces.push(index);
+								//helper.pop();
+							}	
+							else
+							{
+								ind = index;
+								helper.push(index);
+								if (names[names.length - 1] == "while")
+								{
+									links[links.length] = {from:  ind , to:  indeces[indeces.length - 1] , curviness: +50 };
+									ind = nodes[nodes.length -1].key;
+									links[links.length] = {from:  ind , to:  indeces[indeces.length - 1] , curviness: +50 };
+									x=lastindeces.pop();
+									helper.pop();
+									while( helper.length != 0)
+									{
+										ind = helper.pop();
+										links[links.length] = {from:  ind , to:  indeces[indeces.length - 1] , curviness: +50 };
+									}
+										
+									
+								}
+								
+								x -= 100;
+							}
+								
+						}
+						else{
+							if (names[names.length - 1] == "while")
+							{
+								ind = lastindeces.pop();
+								links[links.length] = {from:  ind , to:  indeces[indeces.length - 1] , curviness: +50 };
+								ind = lastindeces.pop();
+								links[links.length] = {from:  ind , to:  indeces[indeces.length - 1] , curviness: +50 };
+								while( helper.length != 0)
+									{
+										ind = helper.pop();
+										links[links.length] = {from:  ind , to:  indeces[indeces.length - 1] , curviness: +50 };
+									}
+								
+							}
+						}
+						name = names.pop();
+						index = indeces.pop();
+						x -= 100;
+						last_y_if = y;
+						yif = y_if.pop();
+					 //	links[links.length] = {from:  index , to:  index , curviness: +0 };
+					}
+						
+					else{
+						var ind = -1;
+						name = names.pop();
+						index = indeces.pop();
+					    ind = nodes[nodes.length - 1].key;
+						lastindeces.push(ind);
+						if ( name == "while")
+						{
+							ind = nodes[nodes.length - 1].key;
+							links[links.length] = {from:  ind , to:  index , curviness: +50 };
+							lastindeces.pop();
+							//lastindeces.push(index);
+						}
+						if( name == "if")
+						{
+							x -= 100;
+							last_y_if = y;
+							yif = y_if.pop();
+						}
+							
+						if (name  == "else")
+						{
+							x +=100;
+							if (last_y_if >= y)
+								y = last_y_if;
+						}
+							
+							
+						
+					}
+					
+					break;
+				case "":
+					break;
+				default:
+					y = y + 50;
+					nodes.push({key : i , loc :  x + " " + y  , text: i  });
+			 if(index != -1){
+					if (name == "while"  )
+					{
+						links[links.length] = {from:  index , to:  i , curviness: +50 };
+						//lastindeces.pop();
+						name= "";
+						index = -1;
+					}
+						
+					if (name == "if"){
+						var last = lastindeces.pop();
+						links[links.length] = {from:  index , to:  i , curviness: +0 };
+						links[links.length] = {from:  last , to:  i , curviness: +0 };
+						/*if (helper.length != 0)
+						{
+							last = helper.pop();
+							links[links.length] = {from:  last , to:  i , curviness: +0 };
+						}*/
+						
+							
+						name= "";
+						index = -1;
+						}
+					if ( name == "else" )
+						{
+							var last = lastindeces.pop();
+							links[links.length] = {from:  last , to:  i , curviness: +0 };
+							last = lastindeces.pop();
+							links[links.length] = {from:  last , to:  i , curviness: +0 };
+							name= "";
+							index = -1;
+						}
+					if (name == "" && names == "")	
+					{	
+						var ind;
+						while(helper.length != 0)
+						{
+							ind = helper.pop();
+							links[links.length] = {from:  ind , to:  i , curviness: +0 };
+							
+						}
+						while(lastindeces.length != 0)
+						{
+							ind = lastindeces.pop();
+							links[links.length] = {from:  ind , to:  i , curviness: +0 };
+							
+						}
+					}
+					
+					if ( name == "")
+					{
+						if( nodes.length != 0 && i !=0 )
+							links[links.length] = {from:  i - 1 , to:  i , curviness: +0 };
+						//var ind = -1;
+						/*ind = nodes[nodes.length - 1].key;
+						links[links.length] = {from:  ind , to:  i , curviness: +0 };*/
+						/*if ( helper.length != 0 && lastindeces.length != 0 && names.length != 0)
+						{
+						
+							ind = helper.pop();
+							links[links.length] = {from:  ind , to:  i , curviness: +0 };
+							
+						}*/
+							
+					}
+		    }
+			else{
+			      if(nodes.length != 1 && i !=1){
+			        var ind = -1;
+					ind = nodes[nodes.length - 2].key;
+					links[links.length] = {from:  ind , to:  i , curviness: +0 };
+					}
+					
+					else{
+					links[links.length] = {from:  i-1 , to:  i , curviness: +0 };
+					}
+			
+			    }
+					
+					if (  i == lines.length -1  )
+					{
+						for ( var k = 0 ; k < lastindeces.length ; k ++)
+						{
+							var ind = lastindeces.pop();
+							links[links.length] = {from:  ind , to:  i , curviness: +0 };
+							
+						}
+					
+				
+						
+						
+				
+					
+			}
+			
+		}
+		}
+		
+		
+		
+		myDiagram.model =   new go.GraphLinksModel(nodes, links);// (nodeDataArray  ,linkDataArray )
+		
+		/*console.log(indeces);
+		console.log(names);
+		console.log(lastindeces);
+		console.log(helper);
+		console.log(nodes);
+		
+		console.log(links);*/
+		
+		console.log(lines);
+		
+		
+	}
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+
+	
+	
+	
+
+</script>
+</head>
+<body onload="init()">
+<div class="col-md-12 text-center">
+	<h1 class="alert alert-success">اكتب كودك البرمجي</h1>
+	<div class='linedtextarea' id="notepad">
+		<textarea class="lined" wrap="off" style="width:100%; height:20%"></textarea>
+	</div>
+	<div class="alert">
+		<button class="btn btn-danger btn-md" onclick="drawgraph()">ارسم المخطط</button>
+	</div>
+	
+</div>
+
+<div class="col-md-12 text-center">
+	<div id="sample">
+	  <div style="width:100%; white-space:nowrap;">
+		<div id="myDiagramDiv" style="border: solid 1px black; width: 100%; height: 84%"></div>
+		
+
+	  </div>
+	</div>
+</div>
+
+
+</body>
+</html>
